@@ -47,8 +47,6 @@ Iterate row by row through input file assigning the values of Job, Type, Currenc
 Target window "Softship LINE"
 
 # Open query mode
-Send Ctrl+S
-# Alternative (Select button)
 Click SELECT_BUTTON
 
 # Job number input field (Job number field)
@@ -59,13 +57,9 @@ Click JOB_NR_FIELD
 Enter current value from variable
 
 # Execute query
-# Send Enter
-# Alternative (Select button)
 Click SELECT_BUTTON
 
 # Enter booking
-# Double click 310,221
-# Alternative (Update button)
 Click UPDATE_BTN
 
 # Wait till Open
@@ -77,16 +71,12 @@ Wait WAIT_TILL_JOB_OPEN seconds
         Save current row of input csv file row to failed jobs output file
         Target window "Question"
         Click OPEN_WITH_USER_IN_BOOKING_NO_BTN
-        # Alternative
-        # Tab + Enter
 
         Continue Main loop
 
 # Clear warning
 Target window "Warning"
 Click WARNING_OK
-# Alternative
-# Send Enter
 
 ########################################
 # ENTER COST
@@ -136,8 +126,6 @@ IF "Warning" window popup occurs
         # Clear warning popup window 
         Target window "Warning"
         Click WARNING_OK
-        # Alternative
-        Send Enter
 
         # Click "Close" button
         Click CLOSE_BTN
@@ -151,8 +139,6 @@ IF "Warning" window popup occurs
 # Clear "Required Value Missing" window
 Target window "Required Value Missing"
 Click REQ_VALUE_MISSING_OK
-# Alternative
-# Send Enter
 
 # Click on first line first field
 Click FIRST_LINE_FIRST_FIELD
@@ -179,9 +165,6 @@ IF contents not empty
         # Clear "Question" window popup
         Target window "Question"
         Click CLOSE_WITHOUT_SAVING_YES
-        # Alternative
-        Send Shift + Tab
-        Send Enter
 
 ########################################
 CLEAR CLOSING WARNINGS AND ERRORS
@@ -194,9 +177,6 @@ Click DELETE_BTN
 # Clear "Question" window popup
 Target window "Question"
 Click DELETE_YES
-# Alternative
-Send Shift + Tab
-Send Enter
 
 # Click "Close" button
 Click CLOSE_BTN
