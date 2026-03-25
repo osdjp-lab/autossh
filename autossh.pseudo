@@ -1,53 +1,92 @@
+########################################
+# CLICK LOCATION COORDINATES
+########################################
+
+SELECT_BTN = (284, 62)
+JOB_NR_FIELD = (310, 221)
+UPDATE_BTN = (384, 65)
+OPEN_WITH_USER_IN_BOOKING_NO_BTN = (332, 279)
+WARNING_OK = (418, 147)
+COSTS_TAB = (835, 148)
+INSERT_BTN = (384, 65)
+SAVE_BTN = (235, 63)
+CLOSE_BTN = (35, 64)
+REQ_VALUE_MISSING_OK = (378, 142)
+FIRST_LINE_FIRST_FIELD = (282, 325)
+CLOSE_WITHOUT_SAVING_YES = (216,162)
+DELETE_BTN = (485, 64)
+DELETE_YES = (101, 146)
+
+########################################
+# CONSTANTS
+########################################
+
+WAIT_TILL_JOB_OPEN = 6
+WAIT_TILL_SAVE = 10
+
+########################################
+
 Prompt user for input csv file
-Verify that the CSV file contains the following columns: Job, Type, Currency, Cost
+Verify that the CSV file contains the following columns: Job, Type, Currency, Cost, Per
+
+FAILED_COSTS = input file base name with failed appended and csv extension
+SUCCEEDED_COSTS = input file base name with succeeded appended and csv extension
+
+To both FAILED_COSTS and SUCCEEDED_COSTS files add input file column names
 
 ########################################
 # MAIN LOOP
 ########################################
 
-Iterate row by row through input file
+Iterate row by row through input file assigning the values of Job, Type, Currency and Cost to variables with the same name
 
 ########################################
 # OPEN JOB
 ########################################
 
+Target window "Softship LINE"
+
 # Open query mode
 Send Ctrl+S
 # Alternative (Select button)
-Click 284,62
+Click SELECT_BUTTON
 
-# Booking number input field (Booking field)
+# Job number input field (Job number field)
 Target window "Softship LINE"
-Click 310,221
+Click JOB_NR_FIELD
 
-# Enter booking number
-Enter from variable
+# Enter job number
+Enter current value from variable
 
 # Execute query
-Send Enter
+# Send Enter
 # Alternative (Select button)
-Click 284,62
+Click SELECT_BUTTON
 
 # Enter booking
-Double click 310,221
+# Double click 310,221
 # Alternative (Update button)
-Click 384,65
+Click UPDATE_BTN
 
 # Wait till Open
-Wait 10s
+Wait WAIT_TILL_JOB_OPEN seconds
 
-# If "Question" window popup occurs
-Save job details, type and costs to failed additions
-Target window "Question"
-Click 332,279
-# Alternative
-Tab + Enter
+####################
+# IF "Question" window popup occurs
+####################
+        Save current row of input csv file row to failed jobs output file
+        Target window "Question"
+        Click OPEN_WITH_USER_IN_BOOKING_NO_BTN
+        # Alternative
+        # Tab + Enter
+
+        Continue Main loop
 
 # Clear warning
 Target window "Warning"
-Click 418,147
+Click WARNING_OK
 # Alternative
-Send Enter
+# Send Enter
 
 ########################################
 # ENTER COST
@@ -60,38 +99,50 @@ Send Enter
 
 # Enter "Costs" tab
 Target window "Softship LINE"
-Click 835,148
-
-# Check if costs not added
-# Check "Surcharge" field:
-#     If all yellow - no cost
-#     If yellow with black writing - unmatched
-#     If blue - with grey writing - matched
+Click COSTS_TAB
 
 # Add new cost line (Insert button)
-Click 384,65
+Click INSERT_BTN
+
+# First field of added line is auto selected
+Input Type from variable
+Tab to next field
+Input '1'
+Tab to next field
+Input '+'
+Tab to next field
+Input Currency
+Tab to next field
+Input integer component of Cost from variable symbol by symbol
+Send ',' (comma)
+Input decimal component from variable symbol by symbol
+Tab to next field
+Input Per value from variable
 
 ########################################
 SAVE CHANGES
 ########################################
 
 # Click "Save" button
-Click 235,63
+Click SAVE_BTN
+
+# Wait till save
+Wait WAIT_TILL_SAVE seconds
 
 ####################
-IF window "Warning" occurs
+IF "Warning" window popup occurs
 ####################
 
         # Clear warning popup window 
         Target window "Warning"
-        Click 418,147
+        Click WARNING_OK
         # Alternative
         Send Enter
 
         # Click "Close" button
-        Click 35,64
+        Click CLOSE_BTN
 
-        continue loop
+        Continue Main loop
 
 ####################
 # IF "Required Value Missing" window occurs
@@ -99,13 +150,14 @@ IF window "Warning" occurs
 
 # Clear "Required Value Missing" window
 Target window "Required Value Missing"
-Click 378,142
+Click REQ_VALUE_MISSING_OK
 # Alternative
-Send Enter
+# Send Enter
 
 # Click on first line first field
-Click 282,325
-Copy contents
+Click FIRST_LINE_FIRST_FIELD
+# Contents is autoselected
+Copy contents to variable
 
 ####################
 IF contents not empty
@@ -118,15 +170,15 @@ IF contents not empty
         # If contents is not empty
         # Save current row input csv file row to failed jobs output file
         # Click "Close" button
-        Click 35,64
+        Click CLOSE_BTN
 
         # Clear "Required Value Missing" window
         Target window "Required Value Missing"
-        Click 378,142
+        Click REQ_VALUE_MISSING_OK
 
         # Clear "Question" window popup
         Target window "Question"
-        Click 101,146
+        Click CLOSE_WITHOUT_SAVING_YES
         # Alternative
         Send Shift + Tab
         Send Enter
@@ -137,17 +189,14 @@ CLEAR CLOSING WARNINGS AND ERRORS
 
 # If contents is empty
 # Delete empty line
-Click 485,64
+Click DELETE_BTN
 
 # Clear "Question" window popup
 Target window "Question"
-Click 101,146
+Click DELETE_YES
 # Alternative
 Send Shift + Tab
 Send Enter
 
 # Click "Close" button
-Click 35,64
-
-
-# Check for warning and question windows and clear them
+Click CLOSE_BTN
