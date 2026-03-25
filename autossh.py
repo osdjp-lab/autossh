@@ -4,14 +4,14 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+import win32gui
+import win32con
+import win32process
+import win32api
+
 import pyautogui
 import pyperclip
 import keyboard
-
-try:
-    import pygetwindow as gw
-except ImportError:
-    gw = None
 
 
 ########################################
@@ -24,13 +24,15 @@ pyautogui.PAUSE = 0.05
 
 ########################################
 # CLICK LOCATION COORDINATES
+# These are assumed to be relative to the
+# OUTER WINDOW RECTANGLE of their target window.
 ########################################
 
 SELECT_BTN = (284, 62)
 JOB_NR_FIELD = (310, 221)
 UPDATE_BTN = (384, 65)
 OPEN_WITH_USER_IN_BOOKING_NO_BTN = (332, 279)
-WARNING_OK = (414, 147)
+WARNING_OK = (422, 161)
 COSTS_TAB = (835, 148)
 INSERT_BTN = (384, 65)
 SAVE_BTN = (235, 63)
@@ -46,12 +48,22 @@ DELETE_YES = (101, 146)
 # CONSTANTS
 ########################################
 
-INTER_ACTION_WAIT = 1
+INTER_ACTION_WAIT = 3
 WAIT_QUERY_SWITCH = 3
 WAIT_TILL_JOB_OPEN = 10
 WAIT_TILL_SAVE = 10
 
 REQUIRED_COLUMNS = ["Job", "Type", "Currency", "Cost", "Per"]
+
+
+########################################
+# WINDOW TITLES
+########################################
+
+SOFTSHIP_WINDOW = "Softship LINE"
+WARNING_WINDOW = "Warning"
+QUESTION_WINDOW = "Question"
+REQ_MISSING_WINDOW = "Required Value Missing"
 
 
 ########################################
@@ -90,49 +102,155 @@ def interruptible_sleep(seconds, interval=0.1):
 # HELPER FUNCTIONS
 ########################################
 
-def activate_window(title_contains: str) -> bool:
+def find_window(title_contains: str):
     """
-    Bring a window containing title_contains to the foreground.
-    Returns True if found, False otherwise.
+    Return the first visible top-level window handle whose title contains title_contains.
+    Returns None if no matching window is found.
     """
     check_stop()
+    matches = []
 
-    if gw is None:
-        print("Warning: pygetwindow is not installed. Window activation will be skipped.")
-        return False
+    def callback(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            if title and title_contains.lower() in title.lower():
+                matches.append(hwnd)
+        return True
 
-    windows = gw.getAllTitles()
-    for title in windows:
-        check_stop()
-        if title_contains.lower() in title.lower():
-            try:
-                matched_windows = gw.getWindowsWithTitle(title)
-                if not matched_windows:
-                    return False
-                win = matched_windows[0]
-                if win.isMinimized:
-                    win.restore()
-                    interruptible_sleep(0.3)
-                win.activate()
-                interruptible_sleep(0.5)
-                return True
-            except Exception as e:
-                print(f"Could not activate window '{title}': {e}")
-                return False
-    return False
+    win32gui.EnumWindows(callback, None)
+    return matches[0] if matches else None
 
 
 def window_exists(title_contains: str) -> bool:
     check_stop()
-    if gw is None:
-        return False
-    return any(title_contains.lower() in t.lower() for t in gw.getAllTitles())
+    return find_window(title_contains) is not None
 
 
-def click(coord, pause=0.3):
+def bring_to_front(hwnd):
+    """
+    Restore and bring the specified window handle to the foreground.
+    Uses thread input attachment to improve reliability.
+    """
     check_stop()
-    pyautogui.click(coord[0], coord[1])
+
+    if not hwnd:
+        return
+
+    # Restore if minimized
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        interruptible_sleep(0.2)
+
+    # Show window
+    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+    interruptible_sleep(0.1)
+
+    # Get thread IDs
+    foreground_hwnd = win32gui.GetForegroundWindow()
+    current_thread_id = win32api.GetCurrentThreadId()
+    target_thread_id = win32process.GetWindowThreadProcessId(hwnd)[0]
+    foreground_thread_id = 0
+
+    if foreground_hwnd:
+        foreground_thread_id = win32process.GetWindowThreadProcessId(foreground_hwnd)[0]
+
+    attached_to_target = False
+    attached_to_foreground = False
+
+    try:
+        if current_thread_id != target_thread_id:
+            win32process.AttachThreadInput(current_thread_id, target_thread_id, True)
+            attached_to_target = True
+
+        if foreground_thread_id and foreground_thread_id != current_thread_id:
+            win32process.AttachThreadInput(current_thread_id, foreground_thread_id, True)
+            attached_to_foreground = True
+
+        win32gui.BringWindowToTop(hwnd)
+        win32gui.SetForegroundWindow(hwnd)
+        win32gui.SetActiveWindow(hwnd)
+        win32gui.SetFocus(hwnd)
+
+    finally:
+        if attached_to_target:
+            try:
+                win32process.AttachThreadInput(current_thread_id, target_thread_id, False)
+            except Exception:
+                pass
+
+        if attached_to_foreground:
+            try:
+                win32process.AttachThreadInput(current_thread_id, foreground_thread_id, False)
+            except Exception:
+                pass
+
+
+def activate_window(title_contains: str) -> bool:
+    """
+    Find a window by title fragment and bring it to the foreground.
+    Returns True if successful, False otherwise.
+    """
+    check_stop()
+    hwnd = find_window(title_contains)
+    if not hwnd:
+        print(f"No window found containing: {title_contains}")
+        return False
+
+    try:
+        bring_to_front(hwnd)
+        interruptible_sleep(0.2)
+        return True
+    except Exception as e:
+        print(f"Failed to activate window '{title_contains}': {e}")
+        return False
+
+
+def get_window_rect(hwnd):
+    """
+    Return (left, top, right, bottom) of the outer window rectangle.
+    """
+    check_stop()
+    return win32gui.GetWindowRect(hwnd)
+
+
+def click_relative_to_window(hwnd, coord, pause=0.3):
+    """
+    Click using coordinates relative to the OUTER WINDOW RECTANGLE.
+    coord = (x, y)
+    """
+    check_stop()
+
+    if not hwnd:
+        raise RuntimeError("Cannot click: invalid window handle.")
+
+    left, top, right, bottom = get_window_rect(hwnd)
+    abs_x = left + coord[0]
+    abs_y = top + coord[1]
+
+    pyautogui.click(abs_x, abs_y)
     interruptible_sleep(pause)
+
+
+def click_in_window(title_contains: str, coord, pause=0.3, activate_first=True):
+    """
+    Find a window by title, optionally activate it, then click coordinates
+    relative to that window.
+    """
+    check_stop()
+
+    hwnd = find_window(title_contains)
+    if not hwnd:
+        raise RuntimeError(f"Window not found: {title_contains}")
+
+    if activate_first:
+        activate_window(title_contains)
+
+        # Re-acquire handle after activation just in case
+        hwnd = find_window(title_contains)
+        if not hwnd:
+            raise RuntimeError(f"Window disappeared after activation: {title_contains}")
+
+    click_relative_to_window(hwnd, coord, pause=pause)
 
 
 def write_text(text: str, interval: float = 0.03):
@@ -211,65 +329,52 @@ def open_job(job_number):
         'question_popup' if Question popup occurred,
         'warning_handled' if Warning popup was cleared.
     """
-    activate_window("Softship LINE")
+    activate_window(SOFTSHIP_WINDOW)
 
     # Open query mode
-    click(SELECT_BTN)
+    click_in_window(SOFTSHIP_WINDOW, SELECT_BTN)
 
     # Wait till query ends
     interruptible_sleep(WAIT_QUERY_SWITCH)
-    
+
     # Job number input field
-    activate_window("Softship LINE")
-    click(JOB_NR_FIELD)
+    click_in_window(SOFTSHIP_WINDOW, JOB_NR_FIELD)
 
-    interruptible_sleep(INTER_ACTION_WAIT)
-    
-    # Enter job number
+    # Move cursor to end of current text
     pyautogui.hotkey("ctrl", "right")
+
+    # Clear field (as in your original logic)
+    for _ in range(10):
+        check_stop()
+        pyautogui.press("backspace")
+
     interruptible_sleep(INTER_ACTION_WAIT)
 
-    # Clear field
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-    pyautogui.press('backspace')
-
-    # Input value
-    interruptible_sleep(INTER_ACTION_WAIT)
+    # Input job number
     write_text(job_number)
 
     # Execute query
-    click(SELECT_BTN)
+    click_in_window(SOFTSHIP_WINDOW, SELECT_BTN)
 
     # Wait till query ends
     interruptible_sleep(WAIT_QUERY_SWITCH)
 
     # Enter booking / update
-    click(UPDATE_BTN)
+    click_in_window(SOFTSHIP_WINDOW, UPDATE_BTN)
 
     # Wait till open
     interruptible_sleep(WAIT_TILL_JOB_OPEN)
 
     # If "Question" window popup occurs
-    if window_exists("Question"):
-        activate_window("Question")
-        click(OPEN_WITH_USER_IN_BOOKING_NO_BTN)
+    if window_exists(QUESTION_WINDOW):
+        click_in_window(QUESTION_WINDOW, OPEN_WITH_USER_IN_BOOKING_NO_BTN)
         return "question_popup"
 
     # Clear warning if present
-    if window_exists("Warning"):
-        activate_window("Warning")
-        click(WARNING_OK)
+    if window_exists(WARNING_WINDOW):
+        click_in_window(WARNING_WINDOW, WARNING_OK)
+        interruptible_sleep(INTER_ACTION_WAIT)
         return "warning_handled"
-
-    interruptible_sleep(INTER_ACTION_WAIT)
 
     return "ok"
 
@@ -278,16 +383,14 @@ def enter_cost(cost_type, currency, cost, per_value):
     """
     Enter cost details in Softship LINE.
     """
-    activate_window("Softship LINE")
+    activate_window(SOFTSHIP_WINDOW)
 
     # Enter Costs tab
-    click(COSTS_TAB)
-
+    click_in_window(SOFTSHIP_WINDOW, COSTS_TAB)
     interruptible_sleep(INTER_ACTION_WAIT)
-    
+
     # Add new cost line
-    click(INSERT_BTN)
-    
+    click_in_window(SOFTSHIP_WINDOW, INSERT_BTN)
     interruptible_sleep(INTER_ACTION_WAIT)
 
     # First field of added line is auto selected
@@ -317,20 +420,18 @@ def save_changes():
         'warning_after_save'
         'required_value_missing'
     """
-    activate_window("Softship LINE")
+    activate_window(SOFTSHIP_WINDOW)
 
-    click(SAVE_BTN)
+    click_in_window(SOFTSHIP_WINDOW, SAVE_BTN)
     interruptible_sleep(WAIT_TILL_SAVE)
 
-    if window_exists("Warning"):
-        activate_window("Warning")
-        click(WARNING_OK)
+    if window_exists(WARNING_WINDOW):
+        click_in_window(WARNING_WINDOW, WARNING_OK)
         interruptible_sleep(INTER_ACTION_WAIT)
         return "warning_after_save"
 
-    if window_exists("Required Value Missing"):
-        activate_window("Required Value Missing")
-        click(REQ_VALUE_MISSING_OK)
+    if window_exists(REQ_MISSING_WINDOW):
+        click_in_window(REQ_MISSING_WINDOW, REQ_VALUE_MISSING_OK)
         interruptible_sleep(INTER_ACTION_WAIT)
         return "required_value_missing"
 
@@ -342,8 +443,8 @@ def handle_required_value_missing():
     Handles the 'Required Value Missing' logic.
     Returns copied contents of first field after clicking it.
     """
-    activate_window("Softship LINE")
-    click(FIRST_LINE_FIRST_FIELD)
+    activate_window(SOFTSHIP_WINDOW)
+    click_in_window(SOFTSHIP_WINDOW, FIRST_LINE_FIRST_FIELD)
 
     # Contents are auto-selected
     contents = copy_selected_text()
@@ -354,37 +455,34 @@ def close_without_saving():
     """
     Close the job and confirm close without saving.
     """
-    activate_window("Softship LINE")
-    click(CLOSE_BTN)
-    
+    activate_window(SOFTSHIP_WINDOW)
+    click_in_window(SOFTSHIP_WINDOW, CLOSE_BTN)
+
     interruptible_sleep(INTER_ACTION_WAIT)
 
-    if window_exists("Required Value Missing"):
-        activate_window("Required Value Missing")
+    if window_exists(REQ_MISSING_WINDOW):
+        click_in_window(REQ_MISSING_WINDOW, REQ_VALUE_MISSING_OK)
         interruptible_sleep(INTER_ACTION_WAIT)
-        click(REQ_VALUE_MISSING_OK)
 
-    if window_exists("Question"):
-        activate_window("Question")
+    if window_exists(QUESTION_WINDOW):
+        click_in_window(QUESTION_WINDOW, CLOSE_WITHOUT_SAVING_YES)
         interruptible_sleep(INTER_ACTION_WAIT)
-        click(CLOSE_WITHOUT_SAVING_YES)
 
 
 def delete_empty_line_and_close():
     """
     Delete an empty cost line, confirm deletion, then close.
     """
-    activate_window("Softship LINE")
-    click(DELETE_BTN)
+    activate_window(SOFTSHIP_WINDOW)
+    click_in_window(SOFTSHIP_WINDOW, DELETE_BTN)
     interruptible_sleep(INTER_ACTION_WAIT)
 
-    if window_exists("Question"):
-        activate_window("Question")
-        click(DELETE_YES)
+    if window_exists(QUESTION_WINDOW):
+        click_in_window(QUESTION_WINDOW, DELETE_YES)
         interruptible_sleep(INTER_ACTION_WAIT)
 
-    activate_window("Softship LINE")
-    click(CLOSE_BTN)
+    activate_window(SOFTSHIP_WINDOW)
+    click_in_window(SOFTSHIP_WINDOW, CLOSE_BTN)
     interruptible_sleep(INTER_ACTION_WAIT)
 
 
@@ -419,11 +517,14 @@ def main():
     try:
         root = tk.Tk()
         root.withdraw()
+        root.attributes("-topmost", True)
 
         input_path_str = filedialog.askopenfilename(
             title="Select input CSV file",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
         )
+
+        root.destroy()
 
         # User cancelled dialog
         if not input_path_str:
@@ -444,14 +545,14 @@ def main():
             reader = csv.DictReader(infile)
             validate_csv_columns(reader.fieldnames)
 
-            # Load all rows into memory so unprocessed rows can be appended to failed on ESC
+            fieldnames = reader.fieldnames
             all_rows = list(reader)
 
         with failed_path.open("w", newline="", encoding="utf-8") as failed_file, \
              succeeded_path.open("w", newline="", encoding="utf-8") as succeeded_file:
 
-            failed_writer = csv.DictWriter(failed_file, fieldnames=REQUIRED_COLUMNS if False else reader.fieldnames)
-            succeeded_writer = csv.DictWriter(succeeded_file, fieldnames=reader.fieldnames)
+            failed_writer = csv.DictWriter(failed_file, fieldnames=fieldnames)
+            succeeded_writer = csv.DictWriter(succeeded_file, fieldnames=fieldnames)
 
             failed_writer.writeheader()
             succeeded_writer.writeheader()
@@ -477,7 +578,6 @@ def main():
                     # OPEN JOB
                     ########################################
                     open_result = open_job(job)
-
                     print(open_result)
 
                     if open_result == "question_popup":
@@ -498,8 +598,8 @@ def main():
 
                     if save_result == "warning_after_save":
                         print(f"Job {job}: Warning after save. Closing and marking as failed.")
-                        activate_window("Softship LINE")
-                        click(CLOSE_BTN)
+                        activate_window(SOFTSHIP_WINDOW)
+                        click_in_window(SOFTSHIP_WINDOW, CLOSE_BTN)
                         save_row(failed_writer, row, failed_file)
                         row_already_written = True
                         continue
@@ -527,8 +627,8 @@ def main():
                     save_row(succeeded_writer, row, succeeded_file)
                     row_already_written = True
 
-                    activate_window("Softship LINE")
-                    click(CLOSE_BTN)
+                    activate_window(SOFTSHIP_WINDOW)
+                    click_in_window(SOFTSHIP_WINDOW, CLOSE_BTN)
 
                 except StopExecution:
                     print(f"\nExecution interrupted during row {row_number}: Job={job}")
@@ -555,27 +655,26 @@ def main():
             failed_file.flush()
             succeeded_file.flush()
 
-        if STOP_REQUESTED:
-            messagebox.showinfo(
-                "Stopped",
-                f"Execution was stopped by pressing ESC.\n\n"
-                f"Failed rows saved to:\n{failed_path}\n\n"
-                f"Succeeded rows saved to:\n{succeeded_path}"
-            )
-        else:
-            messagebox.showinfo(
-                "Done",
-                f"Processing complete.\n\n"
-                f"Failed rows saved to:\n{failed_path}\n\n"
-                f"Succeeded rows saved to:\n{succeeded_path}"
-            )
+        # if STOP_REQUESTED:
+        #     messagebox.showinfo(
+        #         "Stopped",
+        #         f"Execution was stopped by pressing ESC.\n\n"
+        #         f"Failed rows saved to:\n{failed_path}\n\n"
+        #         f"Succeeded rows saved to:\n{succeeded_path}"
+        #     )
+        # else:
+        #     messagebox.showinfo(
+        #         "Done",
+        #         f"Processing complete.\n\n"
+        #         f"Failed rows saved to:\n{failed_path}\n\n"
+        #         f"Succeeded rows saved to:\n{succeeded_path}"
+        #     )
 
         print("\nDone.")
         print(f"Failed rows saved to: {failed_path}")
         print(f"Succeeded rows saved to: {succeeded_path}")
 
     except StopExecution:
-        # This catches stop events before row processing starts
         messagebox.showinfo("Stopped", "Execution was stopped before processing began.")
         print("Execution was stopped before processing began.")
 
