@@ -1,0 +1,153 @@
+Prompt user for input csv file
+Verify that the CSV file contains the following columns: Job, Type, Currency, Cost
+
+########################################
+# MAIN LOOP
+########################################
+
+Iterate row by row through input file
+
+########################################
+# OPEN JOB
+########################################
+
+# Open query mode
+Send Ctrl+S
+# Alternative (Select button)
+Click 284,62
+
+# Booking number input field (Booking field)
+Target window "Softship LINE"
+Click 310,221
+
+# Enter booking number
+Enter from variable
+
+# Execute query
+Send Enter
+# Alternative (Select button)
+Click 284,62
+
+# Enter booking
+Double click 310,221
+# Alternative (Update button)
+Click 384,65
+
+# Wait till Open
+Wait 10s
+
+# If "Question" window popup occurs
+Save job details, type and costs to failed additions
+Target window "Question"
+Click 332,279
+# Alternative
+Tab + Enter
+
+# Clear warning
+Target window "Warning"
+Click 418,147
+# Alternative
+Send Enter
+
+########################################
+# ENTER COST
+########################################
+
+# Example - 9325078 - no costs
+# Example - 9310531 - many costs
+
+########################################
+
+# Enter "Costs" tab
+Target window "Softship LINE"
+Click 835,148
+
+# Check if costs not added
+# Check "Surcharge" field:
+#     If all yellow - no cost
+#     If yellow with black writing - unmatched
+#     If blue - with grey writing - matched
+
+# Add new cost line (Insert button)
+Click 384,65
+
+########################################
+SAVE CHANGES
+########################################
+
+# Click "Save" button
+Click 235,63
+
+####################
+IF window "Warning" occurs
+####################
+
+        # Clear warning popup window 
+        Target window "Warning"
+        Click 418,147
+        # Alternative
+        Send Enter
+
+        # Click "Close" button
+        Click 35,64
+
+        continue loop
+
+####################
+# IF "Required Value Missing" window occurs
+####################
+
+# Clear "Required Value Missing" window
+Target window "Required Value Missing"
+Click 378,142
+# Alternative
+Send Enter
+
+# Click on first line first field
+Click 282,325
+Copy contents
+
+####################
+IF contents not empty
+####################
+
+        ########################################
+        COST ENTRY FAILURE
+        ########################################
+
+        # If contents is not empty
+        # Save current row input csv file row to failed jobs output file
+        # Click "Close" button
+        Click 35,64
+
+        # Clear "Required Value Missing" window
+        Target window "Required Value Missing"
+        Click 378,142
+
+        # Clear "Question" window popup
+        Target window "Question"
+        Click 101,146
+        # Alternative
+        Send Shift + Tab
+        Send Enter
+
+########################################
+CLEAR CLOSING WARNINGS AND ERRORS
+########################################
+
+# If contents is empty
+# Delete empty line
+Click 485,64
+
+# Clear "Question" window popup
+Target window "Question"
+Click 101,146
+# Alternative
+Send Shift + Tab
+Send Enter
+
+# Click "Close" button
+Click 35,64
+
+
+# Check for warning and question windows and clear them
