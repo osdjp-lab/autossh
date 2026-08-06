@@ -1,0 +1,934 @@
+PROGRAM SoftshipCostAutomation
+
+
+CONSTANTS
+
+    // Coordinates relative to the outer rectangle of the target window
+    SELECT_BUTTON                         = (284, 62)
+    JOB_NUMBER_FIELD                      = (310, 221)
+    UPDATE_BUTTON                         = (384, 65)
+    OPEN_WITH_USER_BUTTON                 = (332, 279)
+    WARNING_OK_BUTTON                     = (422, 161)
+    COSTS_TAB                             = (835, 148)
+    INSERT_BUTTON                         = (384, 65)
+    SAVE_BUTTON                           = (235, 63)
+    CLOSE_BUTTON                          = (35, 64)
+    REQUIRED_VALUE_MISSING_OK_BUTTON      = (378, 142)
+    FIRST_LINE_FIRST_FIELD                = (282, 325)
+    CLOSE_WITHOUT_SAVING_YES_BUTTON       = (216, 162)
+    DELETE_BUTTON                         = (485, 64)
+    DELETE_YES_BUTTON                     = (101, 146)
+
+    INTER_ACTION_WAIT = 3 seconds
+    WAIT_QUERY_SWITCH = 3 seconds
+    WAIT_TILL_JOB_OPEN = 6 seconds
+    WAIT_TILL_SAVE = 6 seconds
+
+    REQUIRED_COLUMNS = ["Job", "Type", "Currency", "Cost", "Per"]
+
+    SOFTSHIP_WINDOW = "Softship LINE"
+    WARNING_WINDOW = "Warning"
+    QUESTION_WINDOW = "Question"
+    REQUIRED_VALUE_MISSING_WINDOW = "Required Value Missing"
+
+
+GLOBAL VARIABLES
+
+    STOP_REQUESTED = FALSE
+
+
+CUSTOM EXCEPTION StopExecution
+
+
+PROCEDURE RequestStop
+    SET STOP_REQUESTED TO TRUE
+    DISPLAY "ESC pressed - stopping execution safely..."
+END PROCEDURE
+
+
+PROCEDURE CheckStop
+    IF STOP_REQUESTED IS TRUE THEN
+        RAISE StopExecution
+    END IF
+END PROCEDURE
+
+
+PROCEDURE InterruptibleSleep(seconds, interval = 0.1)
+    SET elapsed TO 0
+
+    WHILE elapsed < seconds DO
+        CALL CheckStop
+
+        SET sleepDuration TO MINIMUM(interval, seconds - elapsed)
+        WAIT sleepDuration
+
+        SET elapsed TO elapsed + sleepDuration
+    END WHILE
+END PROCEDURE
+
+
+//////////////////////////////////////////////////
+// WINDOW HELPER FUNCTIONS
+//////////////////////////////////////////////////
+
+
+FUNCTION FindWindow(titleFragment)
+
+    CALL CheckStop
+
+    SET matchingWindows TO empty list
+
+    FOR EACH visible top-level window DO
+        SET windowTitle TO window's title
+
+        IF windowTitle contains titleFragment, ignoring case THEN
+            ADD window handle TO matchingWindows
+        END IF
+    END FOR
+
+    IF matchingWindows is not empty THEN
+        RETURN first window handle
+    ELSE
+        RETURN NULL
+    END IF
+
+END FUNCTION
+
+
+FUNCTION WindowExists(titleFragment)
+
+    CALL CheckStop
+
+    IF FindWindow(titleFragment) is not NULL THEN
+        RETURN TRUE
+    ELSE
+        RETURN FALSE
+    END IF
+
+END FUNCTION
+
+
+PROCEDURE BringWindowToFront(windowHandle)
+
+    CALL CheckStop
+
+    IF windowHandle is invalid THEN
+        RETURN
+    END IF
+
+    IF window is minimized THEN
+        RESTORE window
+        CALL InterruptibleSleep(0.2)
+    END IF
+
+    SHOW window
+    CALL InterruptibleSleep(0.1)
+
+    GET:
+        current application thread ID
+        target window thread ID
+        current foreground window
+        foreground window thread ID
+
+    SET attachedToTarget TO FALSE
+    SET attachedToForeground TO FALSE
+
+    TRY
+        IF current thread ID differs from target thread ID THEN
+            ATTACH current thread input to target thread input
+            SET attachedToTarget TO TRUE
+        END IF
+
+        IF foreground thread exists
+           AND differs from current thread ID THEN
+
+            ATTACH current thread input to foreground thread input
+            SET attachedToForeground TO TRUE
+        END IF
+
+        BRING target window to top
+        SET target window as foreground window
+        SET target window as active window
+        SET keyboard focus to target window
+
+    FINALLY
+        IF attachedToTarget IS TRUE THEN
+            TRY
+                DETACH current thread input from target thread input
+            CATCH any error
+                IGNORE error
+            END TRY
+        END IF
+
+        IF attachedToForeground IS TRUE THEN
+            TRY
+                DETACH current thread input from foreground thread input
+            CATCH any error
+                IGNORE error
+            END TRY
+        END IF
+    END TRY
+
+END PROCEDURE
+
+
+FUNCTION ActivateWindow(titleFragment)
+
+    CALL CheckStop
+
+    SET windowHandle TO FindWindow(titleFragment)
+
+    IF windowHandle is NULL THEN
+        DISPLAY "No window found containing: " + titleFragment
+        RETURN FALSE
+    END IF
+
+    TRY
+        CALL BringWindowToFront(windowHandle)
+        CALL InterruptibleSleep(0.2)
+
+        RETURN TRUE
+
+    CATCH error
+        DISPLAY "Failed to activate window '" +
+                titleFragment +
+                "': " +
+                error message
+
+        RETURN FALSE
+    END TRY
+
+END FUNCTION
+
+
+FUNCTION GetWindowRectangle(windowHandle)
+
+    CALL CheckStop
+
+    RETURN outer window coordinates:
+           left, top, right, bottom
+
+END FUNCTION
+
+
+PROCEDURE ClickRelativeToWindow(windowHandle, coordinate, pause = 0.3)
+
+    CALL CheckStop
+
+    IF windowHandle is invalid THEN
+        RAISE error "Cannot click: invalid window handle."
+    END IF
+
+    SET windowRectangle TO GetWindowRectangle(windowHandle)
+
+    SET absoluteX TO windowRectangle.left + coordinate.x
+    SET absoluteY TO windowRectangle.top + coordinate.y
+
+    MOVE mouse to absoluteX, absoluteY
+    CLICK mouse
+
+    CALL InterruptibleSleep(pause)
+
+END PROCEDURE
+
+
+PROCEDURE ClickInWindow(
+    titleFragment,
+    coordinate,
+    pause = 0.3,
+    activateFirst = TRUE
+)
+
+    CALL CheckStop
+
+    SET windowHandle TO FindWindow(titleFragment)
+
+    IF windowHandle is NULL THEN
+        RAISE error "Window not found: " + titleFragment
+    END IF
+
+    IF activateFirst IS TRUE THEN
+        CALL ActivateWindow(titleFragment)
+
+        // Obtain the handle again in case the window changed
+        SET windowHandle TO FindWindow(titleFragment)
+
+        IF windowHandle is NULL THEN
+            RAISE error "Window disappeared after activation: " +
+                        titleFragment
+        END IF
+    END IF
+
+    CALL ClickRelativeToWindow(windowHandle, coordinate, pause)
+
+END PROCEDURE
+
+
+PROCEDURE WriteText(text, interval = 0.03)
+
+    FOR EACH character IN text converted to string DO
+        CALL CheckStop
+        TYPE character
+        CALL InterruptibleSleep(interval)
+    END FOR
+
+END PROCEDURE
+
+
+PROCEDURE PressTab(numberOfTimes = 1, pause = 0.2)
+
+    REPEAT numberOfTimes TIMES
+        CALL CheckStop
+        PRESS Tab key
+        CALL InterruptibleSleep(pause)
+    END REPEAT
+
+END PROCEDURE
+
+
+PROCEDURE SaveRow(writer, row, outputFile = NULL)
+
+    WRITE row using writer
+
+    IF outputFile is not NULL THEN
+        FLUSH outputFile
+    END IF
+
+END PROCEDURE
+
+
+FUNCTION SplitCost(costValue)
+
+    CONVERT costValue to trimmed string
+    REPLACE commas with decimal points
+
+    IF cost string contains a decimal point THEN
+        SPLIT cost string at first decimal point INTO:
+            integerPart
+            decimalPart
+
+        APPEND "00" to decimalPart
+        KEEP only the first two decimal digits
+    ELSE
+        SET integerPart TO cost string
+        SET decimalPart TO "00"
+    END IF
+
+    RETURN integerPart, decimalPart
+
+END FUNCTION
+
+
+PROCEDURE TypeCostSymbolBySymbol(costValue)
+
+    SET integerPart, decimalPart TO SplitCost(costValue)
+
+    FOR EACH character IN integerPart DO
+        CALL CheckStop
+        TYPE character
+        CALL InterruptibleSleep(0.03)
+    END FOR
+
+    CALL CheckStop
+    TYPE ","
+    CALL InterruptibleSleep(0.03)
+
+    FOR EACH character IN decimalPart DO
+        CALL CheckStop
+        TYPE character
+        CALL InterruptibleSleep(0.03)
+    END FOR
+
+END PROCEDURE
+
+
+FUNCTION CopySelectedText
+
+    CALL CheckStop
+
+    CLEAR clipboard
+    PRESS Ctrl+C
+    CALL InterruptibleSleep(0.3)
+
+    SET copiedText TO clipboard contents
+    TRIM copiedText
+
+    RETURN copiedText
+
+END FUNCTION
+
+
+//////////////////////////////////////////////////
+// CORE AUTOMATION
+//////////////////////////////////////////////////
+
+
+FUNCTION OpenJob(jobNumber)
+
+    CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+    // Enter query mode
+    CALL ClickInWindow(SOFTSHIP_WINDOW, SELECT_BUTTON)
+    CALL InterruptibleSleep(WAIT_QUERY_SWITCH)
+
+    // Select the job-number field
+    CALL ClickInWindow(SOFTSHIP_WINDOW, JOB_NUMBER_FIELD)
+
+    // Move to the end of the existing field value
+    PRESS Ctrl+Right
+
+    // Clear the existing value
+    REPEAT 10 TIMES
+        CALL CheckStop
+        PRESS Backspace
+    END REPEAT
+
+    CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+    // Enter the new job number
+    CALL WriteText(jobNumber)
+
+    // Execute query
+    CALL ClickInWindow(SOFTSHIP_WINDOW, SELECT_BUTTON)
+    CALL InterruptibleSleep(WAIT_QUERY_SWITCH)
+
+    // Open job in update mode
+    CALL ClickInWindow(SOFTSHIP_WINDOW, UPDATE_BUTTON)
+    CALL InterruptibleSleep(WAIT_TILL_JOB_OPEN)
+
+    IF WindowExists(QUESTION_WINDOW) THEN
+        CALL ClickInWindow(
+            QUESTION_WINDOW,
+            OPEN_WITH_USER_BUTTON
+        )
+
+        RETURN "question_popup"
+    END IF
+
+    IF WindowExists(WARNING_WINDOW) THEN
+        CALL ClickInWindow(
+            WARNING_WINDOW,
+            WARNING_OK_BUTTON
+        )
+
+        CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+        RETURN "warning_handled"
+    END IF
+
+    RETURN "ok"
+
+END FUNCTION
+
+
+PROCEDURE EnterCost(costType, currency, cost, perValue)
+
+    CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+    // Open the Costs tab
+    CALL ClickInWindow(SOFTSHIP_WINDOW, COSTS_TAB)
+    CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+    // Insert a new cost line
+    CALL ClickInWindow(SOFTSHIP_WINDOW, INSERT_BUTTON)
+    CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+    // The first field of the inserted line is selected automatically
+    CALL WriteText(costType)
+    CALL PressTab
+
+    CALL WriteText("1")
+    CALL PressTab
+
+    CALL WriteText("+")
+    CALL PressTab
+
+    CALL WriteText(currency)
+    CALL PressTab
+
+    CALL TypeCostSymbolBySymbol(cost)
+    CALL PressTab
+
+    CALL WriteText(perValue)
+
+END PROCEDURE
+
+
+FUNCTION SaveChanges
+
+    CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+    CALL ClickInWindow(SOFTSHIP_WINDOW, SAVE_BUTTON)
+    CALL InterruptibleSleep(WAIT_TILL_SAVE)
+
+    IF WindowExists(WARNING_WINDOW) THEN
+        CALL ClickInWindow(
+            WARNING_WINDOW,
+            WARNING_OK_BUTTON
+        )
+
+        CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+        RETURN "warning_after_save"
+    END IF
+
+    IF WindowExists(REQUIRED_VALUE_MISSING_WINDOW) THEN
+        CALL ClickInWindow(
+            REQUIRED_VALUE_MISSING_WINDOW,
+            REQUIRED_VALUE_MISSING_OK_BUTTON
+        )
+
+        CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+        RETURN "required_value_missing"
+    END IF
+
+    RETURN "saved"
+
+END FUNCTION
+
+
+FUNCTION HandleRequiredValueMissing
+
+    CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+    CALL ClickInWindow(
+        SOFTSHIP_WINDOW,
+        FIRST_LINE_FIRST_FIELD
+    )
+
+    // Field contents are selected automatically
+    SET contents TO CopySelectedText
+
+    RETURN contents
+
+END FUNCTION
+
+
+PROCEDURE CloseWithoutSaving
+
+    CALL ActivateWindow(SOFTSHIP_WINDOW)
+    CALL ClickInWindow(SOFTSHIP_WINDOW, CLOSE_BUTTON)
+
+    CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+    IF WindowExists(REQUIRED_VALUE_MISSING_WINDOW) THEN
+        CALL ClickInWindow(
+            REQUIRED_VALUE_MISSING_WINDOW,
+            REQUIRED_VALUE_MISSING_OK_BUTTON
+        )
+
+        CALL InterruptibleSleep(INTER_ACTION_WAIT)
+    END IF
+
+    IF WindowExists(QUESTION_WINDOW) THEN
+        CALL ClickInWindow(
+            QUESTION_WINDOW,
+            CLOSE_WITHOUT_SAVING_YES_BUTTON
+        )
+
+        CALL InterruptibleSleep(INTER_ACTION_WAIT)
+    END IF
+
+END PROCEDURE
+
+
+PROCEDURE DeleteEmptyLineAndClose
+
+    CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+    CALL ClickInWindow(
+        SOFTSHIP_WINDOW,
+        DELETE_BUTTON
+    )
+
+    CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+    IF WindowExists(QUESTION_WINDOW) THEN
+        CALL ClickInWindow(
+            QUESTION_WINDOW,
+            DELETE_YES_BUTTON
+        )
+
+        CALL InterruptibleSleep(INTER_ACTION_WAIT)
+    END IF
+
+    CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+    CALL ClickInWindow(
+        SOFTSHIP_WINDOW,
+        CLOSE_BUTTON
+    )
+
+    CALL InterruptibleSleep(INTER_ACTION_WAIT)
+
+END PROCEDURE
+
+
+//////////////////////////////////////////////////
+// CSV HANDLING
+//////////////////////////////////////////////////
+
+
+PROCEDURE ValidateCSVColumns(columnNames)
+
+    IF columnNames is empty THEN
+        RAISE validation error "CSV file has no header row."
+    END IF
+
+    SET missingColumns TO empty list
+
+    FOR EACH requiredColumn IN REQUIRED_COLUMNS DO
+        IF requiredColumn is not in columnNames THEN
+            ADD requiredColumn TO missingColumns
+        END IF
+    END FOR
+
+    IF missingColumns is not empty THEN
+        RAISE validation error
+            "CSV file is missing required columns: " +
+            missingColumns
+    END IF
+
+END PROCEDURE
+
+
+FUNCTION GetOutputPaths(inputCSVPath)
+
+    SET failedPath TO:
+        input CSV directory +
+        input CSV base name +
+        "_failed.csv"
+
+    SET succeededPath TO:
+        input CSV directory +
+        input CSV base name +
+        "_succeeded.csv"
+
+    RETURN failedPath, succeededPath
+
+END FUNCTION
+
+
+//////////////////////////////////////////////////
+// MAIN PROCESS
+//////////////////////////////////////////////////
+
+
+PROCEDURE Main
+
+    REGISTER Escape key hotkey to call RequestStop
+
+    TRY
+        CREATE hidden, always-on-top file dialog window
+
+        SET selectedPath TO show file-open dialog:
+            title = "Select input CSV file"
+            allowed types = CSV files and all files
+
+        DESTROY file dialog window
+
+        IF selectedPath is empty THEN
+            SHOW information message:
+                "Operation cancelled - no CSV file was selected."
+
+            RETURN
+        END IF
+
+        CALL CheckStop
+
+        SET inputCSVPath TO selectedPath
+
+        IF inputCSVPath does not exist THEN
+            SHOW error message:
+                "File not found: " + inputCSVPath
+
+            RETURN
+        END IF
+
+        SET failedPath, succeededPath TO
+            GetOutputPaths(inputCSVPath)
+
+        OPEN inputCSVPath for reading:
+            encoding = UTF-8 with optional byte-order mark
+
+        CREATE dictionary-based CSV reader
+
+        CALL ValidateCSVColumns(reader's column names)
+
+        SET columnNames TO reader's column names
+        READ all CSV records INTO allRows
+
+        CLOSE input CSV file
+
+        OPEN failedPath for writing as failedFile
+        OPEN succeededPath for writing as succeededFile
+
+        CREATE failedWriter using columnNames
+        CREATE succeededWriter using columnNames
+
+        WRITE column headers to failedWriter
+        WRITE column headers to succeededWriter
+
+        CALL CheckStop
+
+        FOR EACH row IN allRows WITH index DO
+
+            SET rowNumber TO index + 1
+            SET rowAlreadyWritten TO FALSE
+
+            SET job TO trimmed value of row["Job"]
+            SET costType TO trimmed value of row["Type"]
+            SET currency["Type" TO trimmed value of rowncy"]
+            SET cost["Currency" TO trimmed value of row          SET per["Cost"Value TO trimmed value of row
+
+            DISPLAY:
+                "Processing row " +
+                rowNumber +
+                ": Job=" +
+                job
+
+            TRY
+                CALL CheckStop
+
+                //////////////////////////////////////////
+                // OPEN JOB
+                //////////////////////////////////////////
+
+                SET openResult TO OpenJob(job)
+                DISPLAY openResult
+
+                IF openResult equals "question_popup" THEN
+                    DISPLAY:
+                        "Job " + job +
+                        ": Question popup occurred while opening. " +
+                        "Marked as failed."
+
+                    CALL SaveRow(
+                        failedWriter,
+                        row,
+                        failedFile
+                    )
+
+                    SET rowAlreadyWritten TO TRUE
+
+                    CONTINUE to next CSV row
+                END IF
+
+                //////////////////////////////////////////
+                // ENTER COST
+                //////////////////////////////////////////
+
+                CALL EnterCost(
+                    costType,
+                    currency,
+                    cost,
+                    perValue
+                )
+
+                //////////////////////////////////////////
+                // SAVE CHANGES
+                //////////////////////////////////////////
+
+                SET saveResult TO SaveChanges
+
+                IF saveResult equals "warning_after_save" THEN
+                    DISPLAY:
+                        "Job " + job +
+                        ": Warning after save. " +
+                        "Closing and marking as failed."
+
+                    CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+                    CALL ClickInWindow(
+                        SOFTSHIP_WINDOW,
+                        CLOSE_BUTTON
+                    )
+
+                    CALL SaveRow(
+                        failedWriter,
+                        row,
+                        failedFile
+                    )
+
+                    SET rowAlreadyWritten TO TRUE
+
+                    CONTINUE to next CSV row
+                END IF
+
+                IF saveResult equals "required_value_missing" THEN
+
+                    SET contents TO HandleRequiredValueMissing
+
+                    IF contents is not empty THEN
+                        DISPLAY:
+                            "Job " + job +
+                            ": Required field missing and first " +
+                            "field not empty. Marked as failed."
+
+                        CALL SaveRow(
+                            failedWriter,
+                            row,
+                            failedFile
+                        )
+
+                        SET rowAlreadyWritten TO TRUE
+
+                        CALL CloseWithoutSaving
+
+                        CONTINUE to next CSV row
+
+                    ELSE
+                        DISPLAY:
+                            "Job " + job +
+                            ": Empty line detected. " +
+                            "Deleting empty line and closing."
+
+                        CALL DeleteEmptyLineAndClose
+
+                        CALL SaveRow(
+                            failedWriter,
+                            row,
+                            failedFile
+                        )
+
+                        SET rowAlreadyWritten TO TRUE
+
+                        CONTINUE to next CSV row
+                    END IF
+                END IF
+
+                //////////////////////////////////////////
+                // SUCCESS
+                //////////////////////////////////////////
+
+                DISPLAY "Job " + job + ": Success."
+
+                CALL SaveRow(
+                    succeededWriter,
+                    row,
+                    succeededFile
+                )
+
+                SET rowAlreadyWritten TO TRUE
+
+                CALL ActivateWindow(SOFTSHIP_WINDOW)
+
+                CALL ClickInWindow(
+                    SOFTSHIP_WINDOW,
+                    CLOSE_BUTTON
+                )
+
+            CATCH StopExecution
+
+                DISPLAY:
+                    "Execution interrupted during row " +
+                    rowNumber +
+                    ": Job=" +
+                    job
+
+                // Ensure the current row is marked as failed
+                IF rowAlreadyWritten IS FALSE THEN
+                    CALL SaveRow(
+                        failedWriter,
+                        row,
+                        failedFile
+                    )
+
+                    SET rowAlreadyWritten TO TRUE
+                END IF
+
+                // Mark every unprocessed row as failed
+                FOR EACH remainingRow AFTER current row IN allRows DO
+                    CALL SaveRow(
+                        failedWriter,
+                        remainingRow,
+                        failedFile
+                    )
+                END FOR
+
+                DISPLAY:
+                    "Remaining unprocessed rows appended " +
+                    "to failed file."
+
+                EXIT row-processing loop
+
+            CATCH any other error
+
+                DISPLAY:
+                    "Job " +
+                    job +
+                    ": Unexpected error: " +
+                    error message
+
+                IF rowAlreadyWritten IS FALSE THEN
+                    CALL SaveRow(
+                        failedWriter,
+                        row,
+                        failedFile
+                    )
+
+                    SET rowAlreadyWritten TO TRUE
+                END IF
+
+            END TRY
+
+        END FOR
+
+        FLUSH failedFile
+        FLUSH succeededFile
+
+        CLOSE failedFile
+        CLOSE succeededFile
+
+        DISPLAY "Done."
+        DISPLAY "Failed rows saved to: " + failedPath
+        DISPLAY "Succeeded rows saved to: " + succeededPath
+
+    CATCH StopExecution
+
+        SHOW information message:
+            "Execution was stopped before processing began."
+
+        DISPLAY:
+            "Execution was stopped before processing began."
+
+    CATCH validation error
+
+        SHOW error message:
+            title = "CSV Validation Error"
+            message = validation error message
+
+        DISPLAY:
+            "CSV Validation Error: " +
+            validation error message
+
+    CATCH any other error
+
+        SHOW error message:
+            title = "Unexpected Error"
+            message = error message
+
+        DISPLAY:
+            "Unexpected Error: " +
+            error message
+
+    FINALLY
+
+        REMOVE all registered keyboard hotkeys
+
+    END TRY
+
+END PROCEDURE
+
+
+//////////////////////////////////////////////////
+// ENTRY POINT
+//////////////////////////////////////////////////
+
+IF this program is being run directly THEN
+    CALL Main
+END IF
+
+
+END PROGRAM

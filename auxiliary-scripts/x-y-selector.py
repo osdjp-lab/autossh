@@ -9,9 +9,9 @@ from tkinter import filedialog
 import threading
 import time
 
-# TARGET = "Softship LINE"
+TARGET = "Softship LINE"
 # TARGET = "Warning"
-TARGET = "Question"
+# TARGET = "Question"
 # TARGET = "Required Value Missing"
 
 output_file_path = None

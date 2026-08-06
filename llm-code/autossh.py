@@ -42,6 +42,7 @@ FIRST_LINE_FIRST_FIELD = (282, 325)
 CLOSE_WITHOUT_SAVING_YES = (216, 162)
 DELETE_BTN = (485, 64)
 DELETE_YES = (101, 146)
+BASE_COST_AREA = ((254,312),(620,465))
 
 
 ########################################
