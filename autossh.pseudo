@@ -16,6 +16,10 @@ FIRST_LINE_FIRST_FIELD = (282, 325)
 CLOSE_WITHOUT_SAVING_YES = (216,162)
 DELETE_BTN = (485, 64)
 DELETE_YES = (101, 146)
+STATE_PIXEL = (1500,580)
+BOOKING_START_DRAG = (900,476)
+BOOKING_END_DRAG = (900,991)
+COSTS_AREA = ((9,314), (616,960))
 
 ########################################
 # CONSTANTS
@@ -23,6 +27,9 @@ DELETE_YES = (101, 146)
 
 WAIT_TILL_JOB_OPEN = 6
 WAIT_TILL_SAVE = 10
+WHITE = (255,255,255)
+BLUE = (150,200,255)
+DARK_BLUE = (0,120,215)
 
 ########################################
 
@@ -46,8 +53,16 @@ Iterate row by row through input file assigning the values of Job, Type, Currenc
 
 Target window "Softship LINE"
 
-# Open query mode
-Click SELECT_BUTTON
+# Color of STATE_PIXEL is either WHITE (query mode) or BLUE (result mode)]
+
+# If in result mode
+IF STATE_PIXEL color equals BLUE
+    # Open query mode
+    Click SELECT_BUTTON
+
+# Wait for pixel color change to query mode before continuing
+WHILE STATE_PIXEL color not equal to QUERY_MODE
+    Do nothing
 
 # Job number input field (Job number field)
 Target window "Softship LINE"
@@ -59,47 +74,89 @@ Enter current value from variable
 # Execute query
 Click SELECT_BUTTON
 
+# Wait for pixel color change to result mode before continuing
+WHILE STATE_PIXEL color not equal to BLUE
+    Do nothing
+
 # Enter booking
 Click UPDATE_BTN
 
-# Wait till Open
-Wait WAIT_TILL_JOB_OPEN seconds
-
-####################
-# IF "Question" window popup occurs
-####################
+IF "Question" window popup occurs
         Save current row of input csv file row to failed jobs output file
         Target window "Question"
         Click OPEN_WITH_USER_IN_BOOKING_NO_BTN
 
         Continue Main loop
 
-# Clear warning
-Target window "Warning"
-Click WARNING_OK
+# Wait for pixel color change to WHITE (booking opening in progress)
+WHILE STATE_PIXEL color not equal to WHITE
+    Do nothing
+
+# Wait for and clear Warning window
+WHILE STATE_PIXEL color not equal to BLUE or "Warning" window does not occur or timeout of 5s not reached
+    Do nothing
+
+IF window warning exists
+    # Clear warning
+    Target window "Warning"
+    Click WARNING_OK
+
+# Wait for STATE_PIXEL to change BLUE (booking has finished loading)
+WHILE STATE_PIXEL not BLUE:
+    Do nothing
+
+########################################
+# ENTER COST TAB
+########################################
+
+Target window "Softship LINE"
+Click COSTS_TAB
+
+# Wait for the drag bar of the costs tab to appear
+WHILE BOOKING_START_DRAG not changed
+    Do nothing
+
+# Expand cost view
+
+Click and drag mouse from BOOKING_START_DRAG to BOOKING_END_DRAG
+
+########################################
+# Scan prexisting costs
+########################################
+
+Tak screenshot of COSTS_AREA and parse with tesseract
+Extract lines and filter by TYPE of cost for entry
+If matching TYPE is found sum prexisting costs taking into account sign
+
+# Calculate difference between target cost and prexisting sum value
+Subtract prexisting costs of the same type from the target value
+
+# Skip cost addition if difference equals zero
+IF DIFFERENCE equals zero
+    # Click "Close" button
+    Click CLOSE_BTN
+
+    # Handle any popup windows (non should occur)
+
+    # Wait for booking to close
+    WHILE BOOKING_END_DRAG not BLUE
+        Do nothing
+
+    Continue main loop
 
 ########################################
 # ENTER COST
 ########################################
 
-# Example - 9325078 - no costs
-# Example - 9310531 - many costs
-
-########################################
-
-# Enter "Costs" tab
-Target window "Softship LINE"
-Click COSTS_TAB
-
 # Add new cost line (Insert button)
 Click INSERT_BTN
 
 # First field of added line is auto selected
-Input Type from variable
+Input TYPE from variable
 Tab to next field
 Input '1'
 Tab to next field
-Input '+'
+Input '+' or '-' depending on sign of calculated difference
 Tab to next field
 Input Currency
 Tab to next field
@@ -107,7 +164,10 @@ Input integer component of Cost from variable symbol by symbol
 Send ',' (comma)
 Input decimal component from variable symbol by symbol
 Tab to next field
-Input Per value from variable
+Input Per value from calculated difference variable
+
+# Validation
+Take secondary screenshot of COSTS_AREA
 
 ########################################
 SAVE CHANGES
@@ -116,13 +176,11 @@ SAVE CHANGES
 # Click "Save" button
 Click SAVE_BTN
 
-# Wait till save
-Wait WAIT_TILL_SAVE seconds
+# Wait for booking to close
+WHILE BOOKING_END_DRAG not BLUE
+    Do nothing
 
-####################
 IF "Warning" window popup occurs
-####################
-
         # Clear warning popup window 
         Target window "Warning"
         Click WARNING_OK
